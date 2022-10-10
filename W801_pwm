@@ -1,0 +1,143 @@
+
+#include "wm_include.h"
+#include "wm_config.h"
+#include "wm_pwm.h"
+#include "wm_cpu.h"
+#include <stdint.h>
+
+//task资源
+#define  LED_TASK_SIZE      					256
+static OS_STK 			led_task_stk[LED_TASK_SIZE];
+
+
+//pwm参数设置
+#define  L_CHANNEL_1 							0 //pwm的通道0
+#define  L_CHANNEL_2 							1 //pwm的通道1
+#define  L_CHANNEL_PIN_1  						WM_IO_PA_10 //pwm的通道0映射的引脚
+#define  L_CHANNEL_PIN_2  						WM_IO_PA_03 //pwm的通道1映射的引脚
+
+#define  _L_PWM_CHANNEL_CONFIG(channel, pin) 	wm_pwm##channel##_config(pin) 
+#define  L_PWM_CHANNEL_CONFIG(channel, pin)     _L_PWM_CHANNEL_CONFIG(channel, pin) 
+#define  L_FREQ									4 //设置pwm的频率，单位是hz，设置pwm频率为50hz
+#define  L_DUTY									64 //占空比,占空比 = S_DUTY/255，其中255由pwm_param.period写死
+#define  L_NUM 									0 //波形周期数(0表示一直运行)
+
+
+
+static int pwm_2syc_mode(u8 channel,u32 freq, u8 duty, u8 num)
+{
+    pwm_init_param pwm_param;
+    int ret=-1;
+	tls_sys_clk sysclk;
+	
+	tls_sys_clk_get(&sysclk);
+
+    memset(&pwm_param, 0, sizeof(pwm_init_param));
+    pwm_param.period = 255;
+    pwm_param.cnt_type = WM_PWM_CNT_TYPE_EDGE_ALIGN_OUT;
+    pwm_param.loop_type = WM_PWM_LOOP_TYPE_LOOP;
+    pwm_param.mode = WM_PWM_OUT_MODE_2SYC;
+    pwm_param.inverse_en = DISABLE;
+    pwm_param.pnum = num;
+    pwm_param.pnum_int = DISABLE;
+    pwm_param.duty = duty;
+    pwm_param.channel = channel;
+    pwm_param.clkdiv = sysclk.apbclk*UNIT_MHZ/256/freq;
+
+    ret = tls_pwm_out_init(&pwm_param);
+
+    return ret;
+}
+
+
+
+
+int pwm_mc_mode(u8 channel,u32 freq, u8 duty, u8 num)
+{
+    pwm_init_param pwm_param;
+    int ret=-1;
+	tls_sys_clk sysclk;
+	
+	tls_sys_clk_get(&sysclk);
+
+    memset(&pwm_param, 0, sizeof(pwm_init_param));
+    pwm_param.period = 255;
+    pwm_param.cnt_type = WM_PWM_CNT_TYPE_EDGE_ALIGN_OUT;
+    pwm_param.loop_type = WM_PWM_LOOP_TYPE_LOOP;
+    pwm_param.mode = WM_PWM_OUT_MODE_MC;
+    pwm_param.inverse_en = DISABLE;
+    pwm_param.pnum = num;
+    pwm_param.pnum_int = DISABLE;
+    pwm_param.duty = duty;
+    pwm_param.channel = channel;
+    pwm_param.clkdiv = sysclk.apbclk*UNIT_MHZ/256/freq;
+    
+    pwm_param.dten = DISABLE; //启用死区互补模式
+    pwm_param.dtclkdiv = 3; //dead zone clock divided value (0~3)
+    pwm_param.dtcnt = 255; //period number of dead zone time  (0~255)
+
+    ret = tls_pwm_out_init(&pwm_param);
+    
+    return ret;
+}
+
+
+//LED的pwm的初始化
+int led_pwm_init()
+{
+	int  ret = -1;
+	//停止pwm
+	tls_pwm_stop(L_CHANNEL_1);
+	tls_pwm_stop(L_CHANNEL_2);
+    
+	//并将引脚映射到pwm通道上
+	L_PWM_CHANNEL_CONFIG(L_CHANNEL_1, L_CHANNEL_PIN_1);
+	L_PWM_CHANNEL_CONFIG(L_CHANNEL_2, L_CHANNEL_PIN_2);
+    
+	//模式采用互补模式函数设置pwm的参数，这个函数在下面有写
+	ret = pwm_2syc_mode(L_CHANNEL_1, L_FREQ, L_DUTY, L_NUM);//由通道0来控制pwm的参数		
+    if(ret != WM_SUCCESS)
+		return ret;	
+
+ 
+	//启动pwm输出
+	tls_pwm_start(L_CHANNEL_1);
+	tls_pwm_start(L_CHANNEL_2);
+	
+	return WM_SUCCESS;
+}
+
+
+//设置PWM占空比duty范围[0-255]
+void set_led_duty(uint8_t duty)
+{
+	tls_pwm_duty_set(L_CHANNEL_1, duty);//由通道0来控制pwm的参数		
+}
+
+
+//led线程
+void led_task(void *sdata)
+{
+	//初始化LDE的pwm
+	led_pwm_init();	
+/*	for(;;)
+	{
+		tls_os_time_delay(100);		
+	}*/
+	
+}
+
+//创建led线程
+void create_led_task(void)
+{
+	tls_os_task_create(NULL, NULL,
+				   led_task,
+				   NULL,
+				   (void *)led_task_stk,          /* task's stack start address */
+				   LED_TASK_SIZE * sizeof(u32), /* task's stack size, unit:byte */
+				   32,
+				   0);
+	
+}
+
+
