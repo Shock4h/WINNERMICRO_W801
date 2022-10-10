@@ -1,0 +1,12 @@
+
+void blink(void)
+	{
+	tls_gpio_cfg(WM_IO_PB_05, WM_GPIO_DIR_OUTPUT, WM_GPIO_ATTR_PULLLOW);
+	for(u8 i=0 ;i<50;i++)
+		{
+			tls_gpio_write(WM_IO_PB_05,1);
+			tls_os_time_delay(500);
+			tls_gpio_write(WM_IO_PB_05,0);
+		}
+	}
+
